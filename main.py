@@ -1,44 +1,56 @@
+# main.py
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import asyncio
+import config
 
-# --- CONFIGURATION (Isko config.py ya .env me shift karenge baad me) ---
-API_ID = 1234567               # my.telegram.org se milega
-API_HASH = "your_api_hash"     # my.telegram.org se milega
-BOT_TOKEN = "your_bot_token"   # BotFather se milega
-ADMIN_GROUP_ID = -10012345678  # Wo private group jahan approval aayenge
+# 1. Initialize Bot (Alerts bhejne aur ban/mute action lene ke liye)
+bot = Client(
+    "admin_bot",
+    api_id=config.API_ID,
+    api_hash=config.API_HASH,
+    bot_token=config.BOT_TOKEN
+)
 
-# 1. Initialize Bot (Admin ko report bhejne aur action lene ke liye)
-bot = Client("admin_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# 2. Initialize Userbot (Groups ko silent hoke monitor karne ke liye)
+# Yahan hum in_memory=True aur session_string ka use kar rahe hain
+userbot = Client(
+    "monitor_userbot",
+    api_id=config.API_ID,
+    api_hash=config.API_HASH,
+    session_string=config.SESSION_STRING,
+    in_memory=True
+)
 
-# 2. Initialize Userbot (Group me messages aur VC monitor karne ke liye)
-userbot = Client("monitor_userbot", api_id=API_ID, api_hash=API_HASH)
-
-# --- USERBOT: Chat Monitoring ---
+# --- USERBOT: Chat Monitoring Logic ---
 @userbot.on_message(filters.group & filters.text)
 async def monitor_chat(client, message):
-    # Abhi ke liye ek simple word filter (Baad me yahan AI LLM/NLP connect karenge)
-    bad_words = ["gali1", "gali2", "spamlink.com"] 
-    
+    # Abhi testing ke liye basic word filter (Baad me yahan AI model lagayenge)
+    bad_words = ["abuse1", "spamlink", "scam"] 
     text = message.text.lower()
     
+    # Agar message me koi bad word hai
     if any(word in text for word in bad_words):
-        # Agar gaali ya spam mila, toh Bot ke through Admin Group me alert bhejo
+        print(f"Violation detected by user: {message.from_user.first_name}")
+        
         alert_text = (
-            f"🚨 **Violation Detected!**\n"
-            f"**User:** {message.from_user.mention} (`{message.from_user.id}`)\n"
-            f"**Group:** {message.chat.title}\n"
-            f"**Message:** {message.text}"
+            f"🚨 **Violation Detected!**\n\n"
+            f"👤 **User:** {message.from_user.mention} (`{message.from_user.id}`)\n"
+            f"👥 **Group:** {message.chat.title}\n"
+            f"💬 **Message:** {message.text}"
         )
         
-        # Inline buttons (Approve/Ignore)
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔨 Approve Ban", callback_data=f"ban_{message.from_user.id}_{message.chat.id}")],
             [InlineKeyboardButton("🔇 Mute 24h", callback_data=f"mute_{message.from_user.id}_{message.chat.id}")],
             [InlineKeyboardButton("❌ Ignore", callback_data="ignore")]
         ])
         
-        await bot.send_message(chat_id=ADMIN_GROUP_ID, text=alert_text, reply_markup=buttons)
+        # Bot admin group me message bhejega
+        try:
+            await bot.send_message(chat_id=config.ADMIN_GROUP_ID, text=alert_text, reply_markup=buttons)
+        except Exception as e:
+            print(f"Error sending message to admin group: {e}")
 
 # --- BOT: Admin Approval Actions ---
 @bot.on_callback_query()
@@ -47,20 +59,27 @@ async def admin_actions(client, callback_query):
     
     if data.startswith("ban"):
         _, user_id, chat_id = data.split("_")
-        # Bot command bhejega ban karne ke liye
+        # User ko ban karna
         await bot.ban_chat_member(int(chat_id), int(user_id))
-        await callback_query.message.edit_text("✅ **User Banned Successfully by Admin.**")
+        await callback_query.message.edit_text(f"✅ **User Banned Successfully.**\n\n{callback_query.message.text}")
+        
+    elif data.startswith("mute"):
+        # Mute logic hum aage add karenge, abhi ke liye sirf message edit karte hain
+        await callback_query.message.edit_text(f"🔇 **User Muted for 24 hours.**\n\n{callback_query.message.text}")
         
     elif data == "ignore":
-        await callback_query.message.edit_text("❌ **Action Ignored.**")
+        await callback_query.message.edit_text(f"❌ **Action Ignored.**\n\n{callback_query.message.text}")
 
-# --- START BOTH CLIENTS ---
+# --- MAIN RUN FUNCTION ---
 async def main():
+    print("Starting Bot and Userbot...")
     await bot.start()
     await userbot.start()
-    print("🚀 AI Moderator System Started!")
+    print("🚀 AI Moderator System is Online!")
+    
     from pyrogram import idle
     await idle()
+    
     await bot.stop()
     await userbot.stop()
 
